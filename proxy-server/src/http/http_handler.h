@@ -38,7 +38,6 @@ class HttpHandler {
         void setDnsCache(Cache<std::string, std::string> *);
 
         std::vector<char> readData(int);
-        int readData(int, char *&);
         int writeData(int, const char *, size_t);
 
         HttpRequest * readRequest(int);

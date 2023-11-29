@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <string>
 
 HttpResponse::HttpResponse() {
@@ -69,7 +70,7 @@ void HttpResponse::setSerializedResponse(const char * response, int length) {
 void HttpResponse::serialize() {
     // the response line and the headers
     std::string response_string_ = "";
-    response_string_ += ("HTTP/" + _http_version + " " + std::to_string(_http_status_code) + " " + _http_status_message + "\r\n");
+    response_string_ += (_http_version + " " + std::to_string(_http_status_code) + " " + _http_status_message + "\r\n");
     
     for (const auto &pair: _http_response_headers) {
         response_string_ += (pair.first + ": " + pair.second + "\r\n");
@@ -85,22 +86,28 @@ void HttpResponse::serialize() {
         response_length = response_string_.size() + _http_response_body_length;
     }
 
-    serialized_response_length_ = response_length + 1;
-    serialized_response_ = new char[serialized_response_length_];
+    // first delete the serialize response and clear it
+    deleteAndNullifyPointer(serialized_response_, true);
 
-    memset(serialized_response_, 0, response_length + 1);
+    std::cout << "In response serializer: " << response_length << std::endl;
+
+    serialized_response_length_ = response_length;
+    serialized_response_ = new char[serialized_response_length_ + 1];
+
+    memset(serialized_response_, 0, serialized_response_length_ + 1);
     
-    strcpy(serialized_response_, response_string_.c_str());
+    memcpy(serialized_response_, response_string_.c_str(), response_string_.size());
 
     // set the body
     if (_http_response_body_length > 0) {
-        strcat(serialized_response_, _http_response_body);
+        memcpy(serialized_response_ + response_string_.size(), _http_response_body, _http_response_body_length);
     }
 }
 
 int HttpResponse::extractResponseParams(const std::string & line) {
     std::istringstream first_line(line);
-    first_line >> _http_version >> _http_status_code >> _http_status_message;
+    first_line >> _http_version >> _http_status_code;
+    getline(first_line, _http_status_message);
     return 0;
 }
 
@@ -148,12 +155,37 @@ int HttpResponse::deserialize() {
     if (ss.peek() == '\n') {
         ss.ignore();
     }
+    
+    // check for the content length header and extract body of the response
+    std::string content_length = getHeaderValue("Content-Length");
+    if (content_length != "") {
+        _http_response_body_length = stoi(content_length);
+        std::cout << "Deserializer: " << _http_response_body_length << std::endl;
+        _http_response_body = new char[_http_response_body_length + 1];
+        memset(_http_response_body, 0, _http_response_body_length + 1);
+        
+        memcpy(_http_response_body, serialized_response_ + ss.tellg(), _http_response_body_length);
+        
+        // // try to create a file
+        // // write the body of the response to a file
+        // const char* filePath = "output2.png";
 
-    // extract body
-    int response_body_length = serialized_response_length_; // just an estimate
-    _http_response_body = new char[response_body_length];
-    memset(_http_response_body, 0, response_body_length);
-    ss.readsome(_http_response_body, response_body_length);
+        // // Open the file for writing
+        // std::ofstream outputFile(filePath, std::ios::binary);
+
+        // // Check if the file is successfully opened
+        // if (outputFile.is_open()) {
+        //     // Write the char* to the file
+        //     outputFile.write(_http_response_body, _http_response_body_length);
+
+        //     // Close the file
+        //     outputFile.close();
+
+        //     std::cout << "Data written to file: " << filePath << std::endl;
+        // } else {
+        //     std::cerr << "Unable to open file: " << filePath << std::endl;
+        // }
+    }
 
     std::cout << " ----------- Finished response deserializer ----------- " << std::endl;
 

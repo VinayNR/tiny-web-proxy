@@ -113,18 +113,27 @@ int HttpRequest::deserialize() {
         ss.ignore();
     }
 
+    std::cout << "Trying to check URI pattern" << std::endl;
     // check if the URI is absolute path, change to relative path with respect to host header
     int pos;
     if ((pos = _http_request_param.uri.find(_http_request_headers["Host"])) != std::string::npos) {
         // update the URI
         _http_request_param.uri = _http_request_param.uri.substr(pos + _http_request_headers["Host"].length());
+        std::cout << "Updated check on URI pattern" << std::endl;
     }
 
-    // extract body
-    int request_body_length = serialized_request_length_; // just an estimate
-    _http_request_body = new char[request_body_length];
-    memset(_http_request_body, 0, request_body_length);
-    ss.readsome(_http_request_body, request_body_length);
+    std::cout << "Trying to get content length from header" << std::endl;
+
+    // check for the content length header and extract body of the response
+    std::string content_length = getHeaderValue("Content-Length");
+    if (content_length != "") {
+        std::cout << "Found content length" << std::endl;
+        _http_request_body_length = stoi(content_length);
+        _http_request_body = new char[_http_request_body_length + 1];
+        memset(_http_request_body, 0, _http_request_body_length + 1);
+        std::cout << "Trying to get data from ss readsome" << std::endl;
+        ss.readsome(_http_request_body, _http_request_body_length);
+    }
     
     std::cout << " ----------- Finished request deserializer ----------- " << std::endl;
     return 0;

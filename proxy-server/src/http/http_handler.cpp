@@ -28,78 +28,6 @@ void HttpHandler::setDnsCache(Cache<std::string, std::string> * dns_cache) {
     dns_cache_ = dns_cache;
 }
 
-/*
-* Reads data on a socket and returns it
-*/
-int HttpHandler::readData(int sockfd, char *& data) {
-    std::cout << std::endl << " ----------- Inside Read data ----------- " <<std::endl;
-
-    int buffer_size = 0;
-    char *buffer = nullptr;
-
-    std::size_t content_length = 0, total_length = 0, header_size = 0;
-    
-    do {
-        if ((buffer_size = TcpSocket::readSocket(sockfd, buffer)) <= 0) {
-            std::cout << " ----------- The buffer size is less than 1, breaking ----------- " << std::endl;
-            break;
-        }
-
-        // find out the content length of the request
-        if (content_length == 0) {
-            // get the content length before deserialization of the data
-            content_length = searchKeyValueFromRawString(buffer, "Content-Length: ", '\r');
-            std::cout << " ----- Found content length ------ " << std::endl;
-            std::cout << content_length << std::endl;
-
-            // get the total number of bytes until the start of body
-            const char* doubleCRLF = strstr(buffer, "\r\n\r\n");
-            if (doubleCRLF != nullptr) {
-                header_size = doubleCRLF - buffer;
-                std::cout << "Header Size: " << header_size << std::endl;
-            }
-
-            // check for content_length_pos
-            if (content_length == 0) {
-                // the request had no content length header, so breaking out
-                data = new char[buffer_size + 1];
-                memset(data, 0, buffer_size + 1);
-                strcpy(data, buffer);
-
-                total_length = buffer_size;
-                break;
-            }
-
-            // // create memory for data based on content length
-            data = new char[content_length + buffer_size];
-            memset(data, 0, content_length + buffer_size);
-        }
-
-        // copy buffer into data
-        strcat(data, buffer);
-        total_length += buffer_size;
-
-        // check if everything is read from the socket
-        if (content_length + header_size <= total_length) {
-            break;
-        }
-
-        // clear the buffer
-        deleteAndNullifyPointer(buffer, true);
-    } while (buffer_size > 0);
-
-    // clear the buffer
-    deleteAndNullifyPointer(buffer, true);
-
-    if (total_length > 0) {
-        std::cout << "Length of data read: " << total_length << std::endl;
-        std::cout << " -------- Finished Read Data ------- " << std::endl;
-        // std::cout << data << std::endl;
-    }
-
-    return total_length;
-}
-
 std::vector<char> HttpHandler::readData(int sockfd) {
     std::cout << std::endl << " ----------- Inside Read data ----------- " <<std::endl;
 
@@ -167,7 +95,7 @@ std::vector<char> HttpHandler::readData(int sockfd) {
 */
 int HttpHandler::writeData(int sockfd, const char * data, size_t length) {
     std::cout << " ------- Writing Data ------- " << std::endl;
-    // std::cout << data << std::endl;
+    std::cout << data << std::endl;
     std::cout << "Length of data: " << length << std::endl;
     return TcpSocket::writeSocket(sockfd, data, length);
 }
@@ -176,19 +104,15 @@ int HttpHandler::writeData(int sockfd, const char * data, size_t length) {
 * Reads a client request from the socket
 */
 HttpRequest * HttpHandler::readRequest(int sockfd) {
-    std::cout << std::endl << " ----------- Reading the request ----------- " <<std::endl;
+    std::cout << std::endl << " ----------- Reading the request ----------- " << std::endl;
     // create a http request object
     HttpRequest *http_request = new HttpRequest;
 
-    char *data = nullptr;
-    int data_size = readData(sockfd, data);
+    std::vector<char> vec_data = readData(sockfd);
+
+    if (vec_data.size() == 0) return nullptr;
     
-    if (data == nullptr) return nullptr;
-
-    http_request->setSerializedRequest(data, data_size);
-
-    // delete the data pointer
-    deleteAndNullifyPointer(data, true);
+    http_request->setSerializedRequest(vec_data.data(), vec_data.size());
 
     // deserialize the data into a http request object
     if (http_request->deserialize() == -1) {
@@ -207,21 +131,15 @@ HttpRequest * HttpHandler::readRequest(int sockfd) {
 * Reads the server response on the socket
 */
 HttpResponse * HttpHandler::readResponse(int sockfd) {
+    std::cout << std::endl << " ----------- Reading the response ----------- " << std::endl;
     // create a http response object
     HttpResponse *http_response = new HttpResponse;
 
-    char *data = nullptr;
-    // int data_size = readData(sockfd, data);
     std::vector<char> vec_data = readData(sockfd);
 
     if (vec_data.size() == 0) return nullptr;
 
-    // if (data == nullptr) return nullptr;
-
     http_response->setSerializedResponse(vec_data.data(), vec_data.size());
-
-    // delete the data pointer
-    deleteAndNullifyPointer(data, true);
 
     // deserialize the data into a http response object
     if (http_response->deserialize() == -1) {
@@ -230,7 +148,28 @@ HttpResponse * HttpHandler::readResponse(int sockfd) {
         return nullptr;
     }
 
-    std::cout << " --------- Finished reading request --------- " << std::endl;
+    // write the body of the response to a file
+    const char* filePath = "output.png";
+
+    // Open the file for writing
+    std::ofstream outputFile(filePath, std::ios::binary);
+
+    // Check if the file is successfully opened
+    if (outputFile.is_open()) {
+        // Write the char* to the file
+        outputFile.write(http_response->getHttpResponseBody(), http_response->getHttpResponseBodyLength());
+
+        // Close the file
+        outputFile.close();
+
+        std::cout << "Data written to file: " << filePath << std::endl;
+    } else {
+        std::cerr << "Unable to open file: " << filePath << std::endl;
+    }
+    
+    std::cout << "Response: " << std::endl;
+    std::cout << http_response->getSerializedResponse() << std::endl;
+    std::cout << " --------- Finished reading response --------- " << std::endl;
     return http_response;
 }
 
@@ -277,7 +216,18 @@ HttpResponse * HttpHandler::handleRequest(HttpRequest * http_request) {
     // validate the request
     if (!isRequestValid(http_request)) {
         std::cerr << "Invalid Request" << std::endl;
-        return nullptr;
+        http_response = new HttpResponse;
+        http_response->setHttpStatusCode(400)
+                    ->setHttpStatusMessage("Bad Request")
+                    ->setHttpVersion(http_request->getHttpVersion())
+                    ->addResponseHeaders("Content-Type", "text/plain")
+                    ->addResponseHeaders("Content-Length", "11")
+                    ->addResponseHeaders("Connection", "close")
+                    ->setHttpResponseBody(
+                                "Bad Request", 11
+                            )
+                    ->serialize();
+        return http_response;
     }
 
     // check the request in denylist
@@ -288,6 +238,7 @@ HttpResponse * HttpHandler::handleRequest(HttpRequest * http_request) {
                     ->setHttpVersion(http_request->getHttpVersion())
                     ->addResponseHeaders("Content-Type", "text/plain")
                     ->addResponseHeaders("Content-Length", "9")
+                    ->addResponseHeaders("Connection", "close")
                     ->setHttpResponseBody(
                                 "Forbidden", 9
                             )
@@ -305,6 +256,7 @@ HttpResponse * HttpHandler::handleRequest(HttpRequest * http_request) {
     HttpServerAddr remote_addr = getRemoteAddress(http_request);
 
     // check if the response is cached
+    
     std::string cache_key = http_request->getHeaderValue("Host") + http_request->getHttpRequestUri();
     std::vector<char> response_string = http_cache_->get(cache_key);
     if (response_string.size() != 0) {
@@ -343,7 +295,6 @@ HttpResponse * HttpHandler::handleRequest(HttpRequest * http_request) {
         // connect to the remote server
         if (connect(new_sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
             std::cerr << "Error connecting to server\n";
-            
             return nullptr;
         }
     }
@@ -390,11 +341,17 @@ HttpResponse * HttpHandler::handleRequest(HttpRequest * http_request) {
         http_response->setHttpStatusCode(404)
                     ->setHttpStatusMessage("Not found")
                     ->setHttpVersion(http_request->getHttpVersion())
-                    ->addResponseHeaders("Connection", "Close")
+                    ->addResponseHeaders("Connection", "close")
                     ->serialize();
         
         return http_response;
     }
+
+    // add the connection close header
+    http_response->addResponseHeaders("Proxy-Connection", "close");
+
+    // serialize the response
+    http_response->serialize();
 
     // add the response to the http cache
     std::cout << std::endl << " ----------- Added the response to the cache ----------- " << std::endl;

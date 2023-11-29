@@ -160,11 +160,11 @@ void ProxyServer::processClientRequests(Queue<int> * client_requests_queue, Http
                 // clean up
                 delete http_request;
                 delete http_response;
-
-                close(client_sockfd);
-
-                std::cout << std::endl << " ----------- Finished serving the client ----------- " <<std::endl << std::endl;
             }
+            // close the socket
+            TcpSocket::closeSocket(client_sockfd);
+
+            std::cout << std::endl << " ----------- Finished serving the client ----------- " <<std::endl << std::endl;
         }
     }
 }
